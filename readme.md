@@ -2,6 +2,21 @@
 
 このパッケージは、クラスインスタンスとアトリビュートから自動的にテーブルを生成し、その内容を保存するユーティリティを提供するパッケージです。
 
+## 動作環境
+
+このパッケージはmongodbがローカルで動作している必要があります。まだ、インストールしていない場合はインストールしてください。
+
+### OSXの場合
+
+Homebrewを使ってインストールできます。
+
+```
+$ brew update
+$ brew install mongodb
+$ ln -sfv /usr/local/opt/mongodb/*.plist ~/Library/LaunchAgents
+$ launchctl load ~/Library/LaunchAgents/homebrew.mxcl.mongodb.plist
+```
+
 ## インストール
 
 pipを使ってインストールするのが便利です。
