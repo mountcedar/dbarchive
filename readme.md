@@ -7,7 +7,7 @@
 pipを使ってインストールするのが便利です。
 
 ```
-$ pip install 
+$ pip install git+https://github.com/mountcedar/dbarchive.git
 ```
 
 master版ではなく、個々に発行された開発版のtarballや、developブランチをインストールする場合は、ソースをcloneした上でsetup.pyを用いてインストールします。
@@ -32,4 +32,27 @@ $ pip uninstall dbarchive
 
 ## 使い方
 
-ソフトウェアのハンドラであるhandle.pyを使って、各種機能を実行します。詳細はhelpオプションを試用してご確認ください。
+サンプルコードは以下のとおりです。
+
+```sample.py
+from dbarchive import connect
+from dbarchive import Base
+
+class Inherit(Base):
+    def __init__(self, max=10):
+        self.base = "hoge"
+        self.bin = numpy.arange(max)
+
+connect()
+print 'create inherit instance'
+inherit = Inherit()
+inherit.save()
+inherit2 = Inherit(3)
+inherit2.save()
+
+for inherit_ in Inherit.objects.all():
+    print 'base: ', inherit_.base if 'base' in inherit_.__dict__ else None
+    print 'bin: ', inherit_.bin if 'bin' in inherit_.__dict__ else None
+
+print "all task completed"
+```
