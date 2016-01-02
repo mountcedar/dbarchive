@@ -50,6 +50,7 @@ $ pip uninstall dbarchive
 サンプルコードは以下のとおりです。
 
 ```sample.py
+import numpy
 from dbarchive import connect
 from dbarchive import Base
 
