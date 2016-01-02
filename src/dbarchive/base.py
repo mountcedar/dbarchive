@@ -11,6 +11,13 @@ import mongoengine
 from bson import Binary
 
 
+def connect():
+    con = pymongo.Connection()
+    con['__py_dbarchive']
+    del con
+    mongoengine.connect('__py_dbarchive')
+
+
 class Base(object):
     @classmethod
     def database(cls, obj=None):
@@ -23,13 +30,10 @@ class Base(object):
                 else:
                     return v
             except:
-                logging.error(traceback.format_exc())
-
+                # logging.error(traceback.format_exc())
+                return None
         attributes = {}
-        # attributes['__getattribute__'] = getattribute
-        if not obj is None:
-            attributes['__unicode__'] = obj.__unicode__
-        else:
+        if obj is None:
             attributes['__getattribute__'] = getattribute
         return type(
             cls.__name__,
@@ -64,17 +68,7 @@ if __name__ == '__main__':
             self.base = "hoge"
             self.bin = numpy.arange(max)
 
-        def __unicode__(self):
-            return str(self.__dict__)
-
-    print "create database in mongodb by pymongo"
-    con = pymongo.Connection()
-    db = con['test_database']
-    del con
-
-    print "connecting db with mongoengine"
-    mongoengine.connect('test_database')
-
+    connect()
     print 'create inherit instance'
     inherit = Inherit()
     inherit.save()
