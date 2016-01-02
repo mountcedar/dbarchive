@@ -17,6 +17,9 @@ from setuptools import setup, find_packages
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
+
+print find_packages('src')
+
 setup(
     name='dbarchive',
     version='0.0.1b',
@@ -24,7 +27,7 @@ setup(
     author=__author__,
     author_email=__author_email__,
     url='',
-    scripts=['src/dbarchive/dbarchive.py', ],
+    # scripts=['src/dbarchive/dbarchive.py', ],
     package_dir={'': 'src'},
     packages=find_packages('src'),
     package_data={
