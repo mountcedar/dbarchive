@@ -38,7 +38,8 @@ setup(
         'click',
         'numpy',
         'scipy',
-        'mongoengine'
+        'pymongo',  # low level api to the mongodb
+        'mongoengine'  # ORM of mongodb
     ],
     zip_safe=False
 )
