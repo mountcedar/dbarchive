@@ -18,11 +18,11 @@ from mongoengine import fields
 from bson import Binary
 
 
-def connect():
+def connect(database="__py_dbarchive", *args, **kwargs):
     con = pymongo.Connection()
-    con['__py_dbarchive']
+    con[database]
     del con
-    mongoengine.connect('__py_dbarchive')
+    mongoengine.connect(database)
 
 
 class LargeBinary(Document):
@@ -52,23 +52,23 @@ class Archiver(object):
 
 
 class PickleArchiver(Archiver):
+    @Archiver.check_size
     def serialize(self, obj):
         bio = io.BytesIO()
         pickle.dump(obj, bio)
         return Binary(bio.getvalue())
 
-    @Archiver.check_size
     def deserialize(self, obj):
         return pickle.load(io.BytesIO(obj))
 
 
 class NpyArchiver(Archiver):
+    @Archiver.check_size
     def serialize(self, obj):
         bio = io.BytesIO()
         numpy.save(bio, obj)
         return Binary(bio.getvalue())
 
-    @Archiver.check_size
     def deserialize(self, obj):
         return numpy.load(io.BytesIO(obj))
 
@@ -119,11 +119,13 @@ class Base(object):
                 print "set attribute customly binalized: ", k, type(v)
                 archiver = self.archivers[type(v)]
                 archivers[k] = archiver.__class__.__name__
-                instance.__setattr__(k, archiver.serialize(v))
+                binary = archiver.serialize(v)
+                instance.__setattr__(k, binary)
             else:
                 print "set attribute pickled: ", k, type(v)
                 archivers[k] = self.default_archiver.__class__.__name__
-                instance.__setattr__(k, self.default_archiver.serialize(v))
+                binary = self.default_archiver.serialize(v)
+                instance.__setattr__(k, binary)
         instance.__setattr__('archivers', archivers)
         instance.save()
 
