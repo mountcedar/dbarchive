@@ -1,13 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import io
+import inspect
+import cPickle as pickle
+from abc import ABCMeta
+from abc import abstractmethod
 import logging
 import traceback
-import inspect
+
 import numpy
-import io
 import pymongo
 import mongoengine
+from mongoengine.document import Document
+from mongoengine.document import DynamicDocument
+from mongoengine import fields
 from bson import Binary
 
 
@@ -18,42 +25,106 @@ def connect():
     mongoengine.connect('__py_dbarchive')
 
 
+class LargeBinary(Document):
+    parent = fields.ReferenceField('Base')
+    binary = fields.FileField()
+
+
+class Archiver(object):
+    __metaclass__ = ABCMeta
+
+    @abstractmethod
+    def serialize(self):
+        return None
+
+    @abstractmethod
+    def deserialize(self):
+        return None
+
+    @classmethod
+    def check_size(cls, f):
+        def check_and_exec(*args, **kwargs):
+            ret = f(*args, **kwargs)
+            if len(ret) > 16 * 1024 ** 2:
+                raise Exception('binary size is too large.')
+            return ret
+        return check_and_exec
+
+
+class PickleArchiver(Archiver):
+    def serialize(self, obj):
+        bio = io.BytesIO()
+        pickle.dump(obj, bio)
+        return Binary(bio.getvalue())
+
+    @Archiver.check_size
+    def deserialize(self, obj):
+        return pickle.load(io.BytesIO(obj))
+
+
+class NpyArchiver(Archiver):
+    def serialize(self, obj):
+        bio = io.BytesIO()
+        numpy.save(bio, obj)
+        return Binary(bio.getvalue())
+
+    @Archiver.check_size
+    def deserialize(self, obj):
+        return numpy.load(io.BytesIO(obj))
+
+
 class Base(object):
+    valid_classes = [int, float, long, bool, str, list, tuple, dict]
+    default_archiver = PickleArchiver()
+
+    def __init__(self):
+        self.excludes = ['valid_classes', 'default_archiver', 'excludes', 'archivers', 'objects']
+        self.archivers = {numpy.ndarray: NpyArchiver()}
+
     @classmethod
     def database(cls, obj=None):
         def getattribute(self, key):
+            v = object.__getattribute__(self, key)
             try:
-                v = mongoengine.document.DynamicDocument.__getattribute__(self, key)
-                if isinstance(v, Binary):
-                    bio = io.BytesIO(v)
-                    return numpy.load(bio)
+                archivers = object.__getattribute__(self, 'archivers')
+                if key in archivers:
+                    archiver = eval(archivers[key])()
+                    return archiver.deserialize(v)
                 else:
                     return v
             except:
                 # logging.error(traceback.format_exc())
-                return None
-        attributes = {}
+                return v
+        attributes = {'meta': {'max_size': 1024**3}}
         if obj is None:
             attributes['__getattribute__'] = getattribute
         return type(
-            cls.__name__,
-            (mongoengine.document.DynamicDocument, ),
+            cls.__name__ + "Table",
+            (DynamicDocument, ),
             attributes
         )
 
     def save(self):
         instance = self.database(self)()
         members = inspect.getmembers(self, lambda a: not(inspect.isroutine(a)))
-        attributes = [(k, v) for k, v in members if not(k.startswith('__') and k.endswith('__'))]
+        attributes = [(k, v) for k, v in members if not k.startswith('_')]
+        archivers = {}
         for k, v in attributes:
-            if k is 'objects':
+            if k in self.excludes:
                 continue
-            if isinstance(v, numpy.ndarray):
-                bio = io.BytesIO()
-                numpy.save(bio, v)
-                instance.__setattr__(k, Binary(bio.getvalue()))
-            else:
+            if type(v) in self.valid_classes:
+                print "set attribute default: ", k, type(v)
                 instance.__setattr__(k, v)
+            elif type(v) in self.archivers.keys():
+                print "set attribute customly binalized: ", k, type(v)
+                archiver = self.archivers[type(v)]
+                archivers[k] = archiver.__class__.__name__
+                instance.__setattr__(k, archiver.serialize(v))
+            else:
+                print "set attribute pickled: ", k, type(v)
+                archivers[k] = self.default_archiver.__class__.__name__
+                instance.__setattr__(k, self.default_archiver.serialize(v))
+        instance.__setattr__('archivers', archivers)
         instance.save()
 
     class __metaclass__(type):
@@ -65,6 +136,7 @@ class Base(object):
 if __name__ == '__main__':
     class Inherit(Base):
         def __init__(self, max=10):
+            Base.__init__(self)
             self.base = "hoge"
             self.bin = numpy.arange(max)
 
