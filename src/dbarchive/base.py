@@ -6,8 +6,9 @@ import inspect
 import cPickle as pickle
 from abc import ABCMeta
 from abc import abstractmethod
+from datetime import datetime
 import logging
-import traceback
+#import traceback
 
 import numpy
 import pymongo
@@ -19,57 +20,75 @@ from bson import Binary
 
 
 def connect(database="__py_dbarchive", *args, **kwargs):
-    con = pymongo.Connection()
+    con = pymongo.Connection(*args, **kwargs)
     con[database]
     del con
-    mongoengine.connect(database)
+    mongoengine.connect(database, *args, **kwargs)
 
 
-class LargeBinary(Document):
-    parent = fields.ReferenceField('Base')
+class LargeBinary(DynamicDocument):
     binary = fields.FileField()
+    created = fields.DateTimeField()
 
 
 class Archiver(object):
     __metaclass__ = ABCMeta
 
     @abstractmethod
-    def serialize(self):
+    def dump(self):
         return None
 
     @abstractmethod
-    def deserialize(self):
+    def restore(self):
         return None
 
     @classmethod
-    def check_size(cls, f):
-        def check_and_exec(*args, **kwargs):
-            ret = f(*args, **kwargs)
+    def post_dump(cls, f):
+        def _filter(self, obj):
+            ret = f(self, obj)
             if len(ret) > 16 * 1024 ** 2:
-                raise Exception('binary size is too large.')
-            return ret
-        return check_and_exec
+                entry = LargeBinary()
+                bio = io.BytesIO(ret)
+                entry.binary.put(bio)
+                entry.created = datetime.now()
+                entry.save()
+                return entry
+            else:
+                return ret
+        return _filter
+
+    @classmethod
+    def pre_restore(cls, f):
+        def _filter(self, obj):
+            if isinstance(obj, LargeBinary):
+                logging.debug('large binary instance coming')
+                return f(self, Binary(obj.binary.read()))
+            else:
+                return f(self, obj)
+        return _filter
 
 
 class PickleArchiver(Archiver):
-    @Archiver.check_size
-    def serialize(self, obj):
+    @Archiver.post_dump
+    def dump(self, obj):
         bio = io.BytesIO()
         pickle.dump(obj, bio)
         return Binary(bio.getvalue())
 
-    def deserialize(self, obj):
+    @Archiver.pre_restore
+    def restore(self, obj):
         return pickle.load(io.BytesIO(obj))
 
 
 class NpyArchiver(Archiver):
-    @Archiver.check_size
-    def serialize(self, obj):
+    @Archiver.post_dump
+    def dump(self, obj):
         bio = io.BytesIO()
         numpy.save(bio, obj)
         return Binary(bio.getvalue())
 
-    def deserialize(self, obj):
+    @Archiver.pre_restore
+    def restore(self, obj):
         return numpy.load(io.BytesIO(obj))
 
 
@@ -89,7 +108,7 @@ class Base(object):
                 archivers = object.__getattribute__(self, 'archivers')
                 if key in archivers:
                     archiver = eval(archivers[key])()
-                    return archiver.deserialize(v)
+                    return archiver.restore(v)
                 else:
                     return v
             except:
@@ -113,21 +132,21 @@ class Base(object):
             if k in self.excludes:
                 continue
             if type(v) in self.valid_classes:
-                print "set attribute default: ", k, type(v)
+                logging.debug("set attribute default: {}, {}".format(k, type(v)))
                 instance.__setattr__(k, v)
             elif type(v) in self.archivers.keys():
-                print "set attribute customly binalized: ", k, type(v)
+                logging.debug("set attribute customly binalized: {}, {}".format(k, type(v)))
                 archiver = self.archivers[type(v)]
                 archivers[k] = archiver.__class__.__name__
-                binary = archiver.serialize(v)
+                binary = archiver.dump(v)
                 instance.__setattr__(k, binary)
             else:
-                print "set attribute pickled: ", k, type(v)
+                logging.debug("set attribute pickled: {}, {}".format(k, type(v)))
                 archivers[k] = self.default_archiver.__class__.__name__
-                binary = self.default_archiver.serialize(v)
+                binary = self.default_archiver.dump(v)
                 instance.__setattr__(k, binary)
         instance.__setattr__('archivers', archivers)
-        instance.save()
+        instance.save(validate=False)
 
     class __metaclass__(type):
         @property
@@ -136,7 +155,9 @@ class Base(object):
 
 
 if __name__ == '__main__':
-    class Inherit(Base):
+    logging.basicConfig(level=logging.DEBUG)
+
+    class Sample(Base):
         def __init__(self, max=10):
             Base.__init__(self)
             self.base = "hoge"
@@ -144,13 +165,13 @@ if __name__ == '__main__':
 
     connect()
     print 'create inherit instance'
-    inherit = Inherit()
-    inherit.save()
-    inherit2 = Inherit(3)
-    inherit2.save()
+    sample01 = Sample(max=10)
+    sample01.save()
+    sample02 = Sample(max=3)
+    sample02.save()
 
-    for inherit_ in Inherit.objects.all():
-        print 'base: ', inherit_.base if 'base' in inherit_.__dict__ else None
-        print 'bin: ', inherit_.bin if 'bin' in inherit_.__dict__ else None
+    for sample in Sample.objects.all():
+        print 'base: ', sample.base
+        print 'bin: ', sample.bin
 
     print "all task completed"
