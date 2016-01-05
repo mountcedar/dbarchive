@@ -76,6 +76,7 @@ $ pip uninstall dbarchive
 
 ```python
 import numpy
+import logging
 from dbarchive import connect
 from dbarchive import Base
 
@@ -171,13 +172,13 @@ __py_dbarchive  0.000GB
 local           0.000GB
 > use __py_dbarchive
 switched to db __py_dbarchive
-> db.inherit_table.find()
+> db.sample_table.find()
 { "_id" : ObjectId("5688cd057fda359ffb66e59b"), "base" : "hoge", "bin" : BinData(0,"k05VTVBZAQBGAHsnZGVzY3InOiAnPGk4JywgJ2ZvcnRyYW5fb3JkZXInOiBGYWxzZSwgJ3NoYXBlJzogKDEwLCksIH0gICAgICAgICAgIAoAAAAAAAAAAAEAAAAAAAAAAgAAAAAAAAADAAAAAAAAAAQAAAAAAAAABQAAAAAAAAAGAAAAAAAAAAcAAAAAAAAACAAAAAAAAAAJAAAAAAAAAA=="), "archivers" : { "bin" : "NpyArchiver" } }
 ```
 
 ## バイナリデータの保持方法
 
-mongodbの仕様で一つのオブジェクト一つの容量に16Mの制限が加えられています。大容量のデータを扱う場合これでは足りなくなるため、GridFSと呼ばれる仕組みを使ってバイナリをチャンクに分けて保存します。そのため、変数のバイナリサイズ次第で動的生成されるテーブル構造が以下のように変化します。
+mongodbの仕様でオブジェクト一つの容量に16Mの制限が加えられています。大容量のデータを扱う場合これでは足りなくなるため、GridFSと呼ばれる仕組みを使ってバイナリをチャンクに分けて保存します。そのため、変数のバイナリサイズ次第で動的生成されるテーブル構造が以下のように変化します。
 
 * バイナリサイズが16Mbyte未満の場合：mongoengine.fields.BinaryFieldとして保存される
 * バイナリサイズが16Mbyte以上の場合：LargeBinaryというテーブルのエントリを新規に作成し、そのテーブルのmongo.fields.FileFieldフィールドにバイナリが保存されます。そして、保存したLargeBinryエントリとの関係が保存されます。
