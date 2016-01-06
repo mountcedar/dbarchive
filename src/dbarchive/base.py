@@ -13,14 +13,14 @@ import logging
 import numpy
 import pymongo
 import mongoengine
-from mongoengine.document import Document
+# from mongoengine.document import Document
 from mongoengine.document import DynamicDocument
 from mongoengine import fields
 from bson import Binary
 
 
 def connect(database="__py_dbarchive", *args, **kwargs):
-    con = pymongo.Connection(*args, **kwargs)
+    con = pymongo.MongoClient(*args, **kwargs)
     con[database]
     del con
     mongoengine.connect(database, *args, **kwargs)
