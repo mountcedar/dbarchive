@@ -213,6 +213,10 @@ class Base(object):
             wrapper_instance.__init__()
             wrapper_instance.collection = instance
             for k, v in attributes:
+                if isinstance(v, LargeBinary):
+                    if k in instance.archivers:
+                        archiver = eval(instance.archivers[k])()
+                        v = archiver.restore(v)
                 wrapper_instance.__setattr__(k, v)
             return wrapper_instance
 
