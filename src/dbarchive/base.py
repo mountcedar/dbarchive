@@ -103,7 +103,7 @@ class Archiver(object):
             if len(ret) > 16 * 1024 ** 2:
                 entry = LargeBinary()
                 bio = io.BytesIO(ret)
-                entry.binary.put(bio)
+                entry.binary.put(bio, content_type="application/octet-stream")
                 entry.created = datetime.now()
                 entry.save()
                 return entry
@@ -122,7 +122,9 @@ class Archiver(object):
         def _filter(self, obj):
             if isinstance(obj, LargeBinary):
                 logging.debug('large binary instance coming')
-                return f(self, Binary(obj.binary.read()))
+                bin = obj.binary.read()
+                logging.debug('bin: {}, size: {}'.format(type(bin), obj.binary.length))
+                return f(self, Binary(bin))
             else:
                 return f(self, obj)
         return _filter
@@ -216,6 +218,7 @@ class Base(object):
                 if isinstance(v, LargeBinary):
                     if k in instance.archivers:
                         archiver = eval(instance.archivers[k])()
+                        logging.debug('variable: {} type {} is restored by {}'.format(k, type(v), archiver.__class__.__name__))
                         v = archiver.restore(v)
                 wrapper_instance.__setattr__(k, v)
             return wrapper_instance
