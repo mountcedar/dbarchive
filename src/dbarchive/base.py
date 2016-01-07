@@ -153,12 +153,13 @@ class Base(object):
     '''
     Base utility class to store its variables into the mongodb collection.
     '''
-    valid_classes = [int, float, long, bool, str, list, tuple, dict]
+    valid_classes = [int, float, long, bool, str, list, tuple, dict, datetime]
     default_archiver = PickleArchiver()
 
-    def __init__(self):
-        self.excludes = ['valid_classes', 'default_archiver', 'excludes', 'archivers', 'objects']
+    def __init__(self, *args, **kwargs):
+        self.excludes = ['valid_classes', 'default_archiver', 'excludes', 'archivers', 'objects', 'collection']
         self.archivers = {numpy.ndarray: NpyArchiver()}
+        self.collection = None
 
     @classmethod
     def database(cls, obj=None):
@@ -177,7 +178,7 @@ class Base(object):
             except:
                 # logging.error(traceback.format_exc())
                 return v
-        attributes = {'meta': {'max_size': 1024**3}}
+        attributes = {}
         if obj is None:
             attributes['__getattribute__'] = getattribute
         return type(
@@ -190,7 +191,9 @@ class Base(object):
         '''
         Create a collection of the current class variables and save the current status in the mongodb.
         '''
-        instance = self.database(self)()
+        if self.collection is None:
+            self.collection = self.database(self)()
+
         members = inspect.getmembers(self, lambda a: not(inspect.isroutine(a)))
         attributes = [(k, v) for k, v in members if not k.startswith('_')]
         archivers = {}
@@ -199,20 +202,20 @@ class Base(object):
                 continue
             if type(v) in self.valid_classes:
                 logging.debug("set attribute default: {}, {}".format(k, type(v)))
-                instance.__setattr__(k, v)
+                self.collection.__setattr__(k, v)
             elif type(v) in self.archivers.keys():
                 logging.debug("set attribute customly binalized: {}, {}".format(k, type(v)))
                 archiver = self.archivers[type(v)]
                 archivers[k] = archiver.__class__.__name__
                 binary = archiver.dump(v)
-                instance.__setattr__(k, binary)
+                self.collection.__setattr__(k, binary)
             else:
                 logging.debug("set attribute pickled: {}, {}".format(k, type(v)))
                 archivers[k] = self.default_archiver.__class__.__name__
                 binary = self.default_archiver.dump(v)
-                instance.__setattr__(k, binary)
-        instance.__setattr__('archivers', archivers)
-        instance.save(validate=False)
+                self.collection.__setattr__(k, binary)
+        self.collection.__setattr__('archivers', archivers)
+        self.collection.save()
 
     class __metaclass__(type):
         @property
@@ -231,6 +234,7 @@ if __name__ == '__main__':
             Base.__init__(self)
             self.base = "hoge"
             self.bin = numpy.arange(max)
+            self.created = datetime.now()
 
     connect()
     print 'create inherit instance'
@@ -242,5 +246,14 @@ if __name__ == '__main__':
     for sample in Sample.objects.all():
         print 'base: ', sample.base
         print 'bin: ', sample.bin
+        print 'created: ', sample.created
+
+    sample01.bin = numpy.arange(20)
+    sample01.save()
+
+    for sample in Sample.objects.all():
+        print 'base: ', sample.base
+        print 'bin: ', sample.bin
+        print 'created: ', sample.created
 
     print "all task completed"
