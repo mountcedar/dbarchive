@@ -6,7 +6,6 @@
 ### 制限事項
 
 * データベース操作スクリプトの欠如：現状、データベースやCollectionの削除はmongoコマンドで直に行う必要があります
-* update関数の欠如：データベースに変数値をアップデートすることができません
 
 ## 動作環境
 
@@ -77,55 +76,58 @@ $ pip uninstall dbarchive
 ```python
 import numpy
 import logging
-from dbarchive import connect
+from datetime import datetime
 from dbarchive import Base
 
-logging.basicConfig(level=logging.DEBUG)
-
 class Sample(Base):
-    def __init__(self, max=10):
-        Base.__init__(self)
+    def __init__(self, maxval=10):
         self.base = "hoge"
-        self.bin = numpy.arange(max)
+        self.bin = numpy.arange(maxval)
+        self.created = datetime.now()
 
-connect()
-print 'create inherit instance'
-sample01 = Sample(max=10)
+print 'create sample instance'
+sample01 = Sample(10)
 sample01.save()
-sample02 = Sample(max=3)
+sample02 = Sample(3)
 sample02.save()
 
 for sample in Sample.objects.all():
-    print 'base: ', sample.base
-    print 'bin: ', sample.bin
+    print 'sample: ', type(sample)
+    print '\tbase: ', sample.base
+    print '\tbin: ', sample.bin
+    print '\tcreated: ', sample.created
+
+sample01.bin = numpy.arange(20)
+sample01.save()
+
+for sample in Sample.objects.all():
+    print 'sample: ', type(sample)
+    print '\tbase: ', sample.base
+    print '\tbin: ', sample.bin
+    print '\tcreated: ', sample.created
 
 print "all task completed"
 ```
 
-上記のコードを簡単に解説します。まず、データベースに接続します。
-
-```
-connect()
-```
-
-次に、データベースで管理したいクラスに、dbarchive.Baseクラスを継承させます。
+上記のコードを簡単に解説します。
+まず、データベースで管理したいクラスに、dbarchive.Baseクラスを継承させます。
 
 ```python
 class Sample(Base):
-    def __init__(self, max=10):
-        Base.__init__(self)
+    def __init__(self, maxval=10):
         self.base = "hoge"
-        self.bin = numpy.arange(max)
+        self.bin = numpy.arange(maxval)
+        self.created = datetime.now()
 ```
 
 dbarchive.Baseクラスを継承することで、データベース保存に必要なユーティリティを持ったクラスを作ることができます。
 あとは、インスタンスをsave関数で保存するだけです。
 
 ```python
-print 'create inherit instance'
-sample01 = Sample(max=10)
+print 'create sample instance'
+sample01 = Sample(10)
 sample01.save()
-sample02 = Sample(max=3)
+sample02 = Sample(3)
 sample02.save()
 ```
 
@@ -136,8 +138,10 @@ save関数が呼び出されると、クラスは\<class名>\_tableというテ�
 
 ```python
 for sample in Sample.objects.all():
-    print 'base: ', sample.base
-    print 'bin: ', sample.bin
+    print 'sample: ', type(sample)
+    print '\tbase: ', sample.base
+    print '\tbin: ', sample.bin
+    print '\tcreated: ', sample.created
 ```
 
 上記は、これまで保存した全てのインスタンスを取得し、表示するコードです。objectsハンドラによるクエリセットの作成の詳細については以下のドキュメントを参考にしてください。
@@ -203,7 +207,7 @@ sample_table
 
 ## 複数のユーザや複数のサーバで使用する場合のポイント
 
-計算機サーバなどで、複数のユーザと並行してdbarchiveを使用する場合、デフォルトの使い方をすると同じデータベースを使うため、それぞれの実行結果が混ざって保存されることになります。その場合、connect関数にデータベース名を指定することで別々のデータベースに結果を保存することが可能になります。
+計算機サーバなどで、複数のユーザと並行してdbarchiveを使用する場合、デフォルトの使い方をすると同じデータベースを使うため、それぞれの実行結果が混ざって保存されることになります。その場合、connect関数を明示的に呼び出しデータベース名を指定することで別々のデータベースに結果を保存することが可能になります。
 
 ```python
 from dbarchive import connect
@@ -220,6 +224,15 @@ connect('myown', host="somedomain.com", port=12345, username="hoge", password="g
 ```
 
 複数のマシンで分散して学習した結果をデータベースに集約したい場合に使うと便利です。
+
+### Collection旧定義の削除
+
+drop_collection関数は対応するデータベースCollectionを削除するコマンドです。クラスの内容を再定義した場合などは、旧定義のものと整合が合わなくなることがあるので、この関数を使って、旧定義のCollectionを削除しましょう。
+
+```
+print 'dropping past sample collection'
+Sample.drop_collection()
+```
 
 ### より実用的な応用例
 

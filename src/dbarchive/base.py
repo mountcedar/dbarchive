@@ -13,6 +13,7 @@ from abc import abstractmethod
 from datetime import datetime
 import logging
 #import traceback
+from copy import deepcopy
 
 import numpy
 import pymongo
@@ -22,6 +23,8 @@ from mongoengine.document import DynamicDocument
 from mongoengine import fields
 from bson import Binary
 
+__connected = False
+
 
 def connect(database="__py_dbarchive", *args, **kwargs):
     '''
@@ -30,10 +33,16 @@ def connect(database="__py_dbarchive", *args, **kwargs):
     arguments are corresponding to the mongoengine api, mongoengine.connect
     see http://docs.mongoengine.org/apireference.html#mongoengine.connect
     '''
-    con = pymongo.MongoClient(*args, **kwargs)
-    con[database]
-    del con
-    mongoengine.connect(database, *args, **kwargs)
+    global __connected
+    try:
+        if not __connected:
+            con = pymongo.MongoClient(*args, **kwargs)
+            con[database]
+            del con
+            mongoengine.connect(database, *args, **kwargs)
+            __connected = True
+    except:
+        logging.error('connection to the mongodb failed.')
 
 
 class LargeBinary(DynamicDocument):
@@ -154,12 +163,19 @@ class Base(object):
     Base utility class to store its variables into the mongodb collection.
     '''
     valid_classes = [int, float, long, bool, str, list, tuple, dict, datetime]
+    default_excludes = [
+        'valid_classes', 'default_excludes', 'default_archiver',
+        'excludes', 'archivers', 'objects', 'collection'
+    ]
     default_archiver = PickleArchiver()
 
-    def __init__(self, *args, **kwargs):
-        self.excludes = ['valid_classes', 'default_archiver', 'excludes', 'archivers', 'objects', 'collection']
-        self.archivers = {numpy.ndarray: NpyArchiver()}
-        self.collection = None
+    def __new__(cls, *args, **kwargs):
+        connect()
+        instance = super(Base, cls).__new__(cls)
+        instance.excludes = deepcopy(cls.default_excludes)
+        instance.archivers = {numpy.ndarray: NpyArchiver()}
+        instance.collection = None
+        return instance
 
     @classmethod
     def database(cls, obj=None):
@@ -167,6 +183,10 @@ class Base(object):
         Dynamically define a child class of DynamicDocument based on the current class variable configuration.
         '''
         def getattribute(self, key):
+            '''
+            custom development of __getattribute__ for the DynamicDocument
+            to directly convert the bson.Binary object into the specific type.
+            '''
             v = object.__getattribute__(self, key)
             try:
                 archivers = object.__getattribute__(self, 'archivers')
@@ -178,22 +198,39 @@ class Base(object):
             except:
                 # logging.error(traceback.format_exc())
                 return v
+
+        def new(clazz, *args, **kwargs):
+            '''
+            custom development of __new__ for DynamicDocument.
+
+            returns the class instance inheritating the Base class
+            '''
+            instance = super(DynamicDocument, clazz).__new__(clazz, *args, **kwargs)
+            instance.__init__(*args, **kwargs)
+            members = inspect.getmembers(instance, lambda a: not(inspect.isroutine(a)))
+            attributes = [(k, v) for k, v in members if not k.startswith('_')]
+            wrapper_instance = cls.__new__(cls)
+            wrapper_instance.__init__()
+            wrapper_instance.collection = instance
+            for k, v in attributes:
+                wrapper_instance.__setattr__(k, v)
+            return wrapper_instance
+
         attributes = {}
         if obj is None:
             attributes['__getattribute__'] = getattribute
+            attributes['__new__'] = new
         return type(
             cls.__name__ + "Table",
             (DynamicDocument, ),
             attributes
         )
 
-    def save(self):
+    def create_collection(self):
         '''
-        Create a collection of the current class variables and save the current status in the mongodb.
+        create mongodb collection ORM based on the current class variable configuration
         '''
-        if self.collection is None:
-            self.collection = self.database(self)()
-
+        collection = self.database(self)()
         members = inspect.getmembers(self, lambda a: not(inspect.isroutine(a)))
         attributes = [(k, v) for k, v in members if not k.startswith('_')]
         archivers = {}
@@ -202,20 +239,58 @@ class Base(object):
                 continue
             if type(v) in self.valid_classes:
                 logging.debug("set attribute default: {}, {}".format(k, type(v)))
-                self.collection.__setattr__(k, v)
+                collection.__setattr__(k, v)
             elif type(v) in self.archivers.keys():
                 logging.debug("set attribute customly binalized: {}, {}".format(k, type(v)))
                 archiver = self.archivers[type(v)]
                 archivers[k] = archiver.__class__.__name__
                 binary = archiver.dump(v)
-                self.collection.__setattr__(k, binary)
+                collection.__setattr__(k, binary)
             else:
                 logging.debug("set attribute pickled: {}, {}".format(k, type(v)))
                 archivers[k] = self.default_archiver.__class__.__name__
                 binary = self.default_archiver.dump(v)
-                self.collection.__setattr__(k, binary)
-        self.collection.__setattr__('archivers', archivers)
+                collection.__setattr__(k, binary)
+        collection.__setattr__('archivers', archivers)
+        return collection
+
+    def save(self):
+        '''
+        Create a collection of the current class variables and save the current status in the mongodb.
+        '''
+        if self.collection is None:
+            self.collection = self.create_collection()
+        else:
+            members = inspect.getmembers(self, lambda a: not(inspect.isroutine(a)))
+            attributes = [(k, v) for k, v in members if not k.startswith('_')]
+            archivers = {}
+            for k, v in attributes:
+                if k in self.excludes:
+                    continue
+                if type(v) in self.valid_classes:
+                    logging.debug("set attribute default: {}, {}".format(k, type(v)))
+                    self.collection.__setattr__(k, v)
+                elif type(v) in self.archivers.keys():
+                    logging.debug("set attribute customly binalized: {}, {}".format(k, type(v)))
+                    archiver = self.archivers[type(v)]
+                    archivers[k] = archiver.__class__.__name__
+                    binary = archiver.dump(v)
+                    self.collection.__setattr__(k, binary)
+                else:
+                    logging.debug("set attribute pickled: {}, {}".format(k, type(v)))
+                    archivers[k] = self.default_archiver.__class__.__name__
+                    binary = self.default_archiver.dump(v)
+                    self.collection.__setattr__(k, binary)
+            self.collection.__setattr__('archivers', archivers)
         self.collection.save()
+
+    @classmethod
+    def drop_collection(cls):
+        '''
+        drop collection representing the class from mongodb
+        '''
+        connect()
+        cls.database().drop_collection()
 
     class __metaclass__(type):
         @property
@@ -223,6 +298,7 @@ class Base(object):
             '''
             The queryset instance for quering the mongodb.
             '''
+            connect()
             return cls.database().objects
 
 
@@ -230,30 +306,33 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
 
     class Sample(Base):
-        def __init__(self, max=10):
-            Base.__init__(self)
+        def __init__(self, maxval=10):
             self.base = "hoge"
-            self.bin = numpy.arange(max)
+            self.bin = numpy.arange(maxval)
             self.created = datetime.now()
 
-    connect()
-    print 'create inherit instance'
-    sample01 = Sample(max=10)
+    print 'dropping past sample collection'
+    Sample.drop_collection()
+
+    print 'create sample instance'
+    sample01 = Sample(10)
     sample01.save()
-    sample02 = Sample(max=3)
+    sample02 = Sample(3)
     sample02.save()
 
     for sample in Sample.objects.all():
-        print 'base: ', sample.base
-        print 'bin: ', sample.bin
-        print 'created: ', sample.created
+        print 'sample: ', type(sample)
+        print '\tbase: ', sample.base
+        print '\tbin: ', sample.bin
+        print '\tcreated: ', sample.created
 
     sample01.bin = numpy.arange(20)
     sample01.save()
 
     for sample in Sample.objects.all():
-        print 'base: ', sample.base
-        print 'bin: ', sample.bin
-        print 'created: ', sample.created
+        print 'sample: ', type(sample)
+        print '\tbase: ', sample.base
+        print '\tbin: ', sample.bin
+        print '\tcreated: ', sample.created
 
     print "all task completed"
