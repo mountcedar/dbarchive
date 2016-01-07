@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+'''
+Base module for implementing the abstract class for ORM
+'''
+
 import io
 import inspect
 import cPickle as pickle
@@ -20,6 +24,12 @@ from bson import Binary
 
 
 def connect(database="__py_dbarchive", *args, **kwargs):
+    '''
+    the api to connect your local mongodb (by default host="localhost", port=27017).
+
+    arguments are corresponding to the mongoengine api, mongoengine.connect
+    see http://docs.mongoengine.org/apireference.html#mongoengine.connect
+    '''
     con = pymongo.MongoClient(*args, **kwargs)
     con[database]
     del con
@@ -27,23 +37,58 @@ def connect(database="__py_dbarchive", *args, **kwargs):
 
 
 class LargeBinary(DynamicDocument):
+    '''
+    The ORM model for large binary.
+
+    Since the mongodb restrict each object size exceed to 16MB.
+    The binary beyond 16MB should be stored using the GridFS feature.
+    This table model is for dealing with the binary larger than 16MB,
+    using the FileField in mongoengine.
+
+    The detail description concerning the GridFS can be found in
+
+    - GridFS supports in mongoengine: http://docs.mongoengine.org/guide/gridfs.html
+    - GridFS: https://docs.mongodb.org/manual/core/gridfs/
+    '''
     binary = fields.FileField()
     created = fields.DateTimeField()
 
 
 class Archiver(object):
+    '''
+    the superclass for archiving the mogoengine unsupporting variables in the class.
+
+    The child class of this class should have dump / restore methods
+    for handling the binary expression of the variable.
+    dump() method be also with post_dump decorator as well as
+    restore() method be with pre_restore decorator.
+
+    See PickleArchiver, NpyArchiver for more concrete example.
+    '''
     __metaclass__ = ABCMeta
 
     @abstractmethod
-    def dump(self):
+    def dump(self, obj):
+        '''
+        Accept any object as an argument and dump it into a bson.Binary expression.
+        '''
         return None
 
     @abstractmethod
-    def restore(self):
+    def restore(self, obj):
+        '''
+        Accept bson.Binary expression and restore it as a input variable style.
+        '''
         return None
 
     @classmethod
     def post_dump(cls, f):
+        '''
+        The definition of post-dump processing.
+
+        if the object size exceed 16MB, then create a LargeBinary instance
+        and hold it as a ReferenceFiled in the table.
+        '''
         def _filter(self, obj):
             ret = f(self, obj)
             if len(ret) > 16 * 1024 ** 2:
@@ -59,6 +104,12 @@ class Archiver(object):
 
     @classmethod
     def pre_restore(cls, f):
+        '''
+        The definition of pre-restore processing.
+
+        Accept LargeBinary reference and extract bson.Binary instance from it
+        and pass the instance to the restore method
+        '''
         def _filter(self, obj):
             if isinstance(obj, LargeBinary):
                 logging.debug('large binary instance coming')
@@ -69,6 +120,9 @@ class Archiver(object):
 
 
 class PickleArchiver(Archiver):
+    '''
+    The Archiver implementation with pickle format.
+    '''
     @Archiver.post_dump
     def dump(self, obj):
         bio = io.BytesIO()
@@ -81,6 +135,9 @@ class PickleArchiver(Archiver):
 
 
 class NpyArchiver(Archiver):
+    '''
+    The Archiver implementation with npy format.
+    '''
     @Archiver.post_dump
     def dump(self, obj):
         bio = io.BytesIO()
@@ -93,6 +150,9 @@ class NpyArchiver(Archiver):
 
 
 class Base(object):
+    '''
+    Base utility class to store its variables into the mongodb collection.
+    '''
     valid_classes = [int, float, long, bool, str, list, tuple, dict]
     default_archiver = PickleArchiver()
 
@@ -102,6 +162,9 @@ class Base(object):
 
     @classmethod
     def database(cls, obj=None):
+        '''
+        Dynamically define a child class of DynamicDocument based on the current class variable configuration.
+        '''
         def getattribute(self, key):
             v = object.__getattribute__(self, key)
             try:
@@ -124,6 +187,9 @@ class Base(object):
         )
 
     def save(self):
+        '''
+        Create a collection of the current class variables and save the current status in the mongodb.
+        '''
         instance = self.database(self)()
         members = inspect.getmembers(self, lambda a: not(inspect.isroutine(a)))
         attributes = [(k, v) for k, v in members if not k.startswith('_')]
@@ -151,6 +217,9 @@ class Base(object):
     class __metaclass__(type):
         @property
         def objects(cls):
+            '''
+            The queryset instance for quering the mongodb.
+            '''
             return cls.database().objects
 
 
