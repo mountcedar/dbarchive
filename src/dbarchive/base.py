@@ -77,16 +77,16 @@ class Archiver(object):
     __metaclass__ = ABCMeta
 
     @abstractmethod
-    def dump(self, obj):
+    def dump(self, file):
         '''
-        Accept any object as an argument and dump it into a bson.Binary expression.
+        Accept any object as an argument and dump it into a file stream
         '''
         return None
 
     @abstractmethod
-    def restore(self, obj):
+    def restore(self, file):
         '''
-        Accept bson.Binary expression and restore it as a input variable style.
+        Accept file stream and restore it as a input variable style.
         '''
         return None
 
@@ -99,16 +99,19 @@ class Archiver(object):
         and hold it as a ReferenceFiled in the table.
         '''
         def _filter(self, obj):
-            ret = f(self, obj)
-            if len(ret) > 16 * 1024 ** 2:
+            fp = f(self, obj)
+            fp.seek(0, 2)
+            if fp.tell() > 16 * 1024 ** 2:
+                logging.debug('switching large binary')
                 entry = LargeBinary()
-                bio = io.BytesIO(ret)
-                entry.binary.put(bio, content_type="application/octet-stream")
+                fp.seek(0)
+                entry.binary.put(fp)
                 entry.created = datetime.now()
                 entry.save()
                 return entry
             else:
-                return ret
+                binary = Binary(fp.getvalue())
+                return binary
         return _filter
 
     @classmethod
@@ -120,13 +123,12 @@ class Archiver(object):
         and pass the instance to the restore method
         '''
         def _filter(self, obj):
-            if isinstance(obj, LargeBinary):
-                logging.debug('large binary instance coming')
-                bin = obj.binary.read()
-                logging.debug('bin: {}, size: {}'.format(type(bin), obj.binary.length))
-                return f(self, Binary(bin))
+            if isinstance(obj, Binary):
+                bio = io.BytesIO(obj)
+                return f(self, bio)
             else:
-                return f(self, obj)
+                logging.debug('obj.binary: {}'.format(type(obj.binary)))
+                return f(self, obj.binary)
         return _filter
 
 
@@ -138,11 +140,16 @@ class PickleArchiver(Archiver):
     def dump(self, obj):
         bio = io.BytesIO()
         pickle.dump(obj, bio)
-        return Binary(bio.getvalue())
+        return bio
 
     @Archiver.pre_restore
-    def restore(self, obj):
-        return pickle.load(io.BytesIO(obj))
+    def restore(self, fp):
+        logging.debug('fp: {}'.format(type(fp)))
+        bio = io.BytesIO(fp.read())
+        bio.seek(0, 2)
+        logging.debug('file size: {}'.format(bio.tell()))
+        bio.seek(0)
+        return pickle.load(bio)
 
 
 class NpyArchiver(Archiver):
@@ -153,11 +160,11 @@ class NpyArchiver(Archiver):
     def dump(self, obj):
         bio = io.BytesIO()
         numpy.save(bio, obj)
-        return Binary(bio.getvalue())
+        return bio
 
     @Archiver.pre_restore
-    def restore(self, obj):
-        return numpy.load(io.BytesIO(obj))
+    def restore(self, fp):
+        return numpy.load(fp)
 
 
 class Base(object):
