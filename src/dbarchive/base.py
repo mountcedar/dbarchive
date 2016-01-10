@@ -240,8 +240,9 @@ class Base(object):
 
         attributes = {}
         if obj is None:
-            attributes['__getattribute__'] = getattribute
-            attributes['__new__'] = new
+            # attributes['__getattribute__'] = getattribute
+            # attributes['__new__'] = new
+            pass
         return type(
             cls.__name__ + "Table",
             (DynamicDocument, ),
