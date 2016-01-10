@@ -30,7 +30,8 @@ if __name__ == '__main__':
             ary = pickle.load(fp)
         print 'ary: ', ary.shape
         bio = io.BytesIO()
-        numpy.save(bio, ary)
+        # numpy.save(bio, ary)
+        pickle.dump(ary, bio)
         bio.seek(0)
         entry.bin.put(bio)
         entry.created = datetime.now()
@@ -39,5 +40,6 @@ if __name__ == '__main__':
     print 'query and view'
     for obj in Binary.objects.all():
         # bio = io.BytesIO(obj.bin.read())
-        ary = numpy.load(obj.bin)
+        print "bin type: ", type(obj.bin)
+        ary = pickle.load(obj.bin)
         print 'load array: ', ary.shape

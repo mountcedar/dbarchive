@@ -12,7 +12,7 @@ from abc import ABCMeta
 from abc import abstractmethod
 from datetime import datetime
 import logging
-#import traceback
+import traceback
 from copy import deepcopy
 
 import numpy
@@ -102,7 +102,7 @@ class Archiver(object):
             fp = f(self, obj)
             fp.seek(0, 2)
             if fp.tell() > 16 * 1024 ** 2:
-                logging.debug('switching large binary')
+                logging.debug('switching large binary, size: {}'.format(fp.tell()))
                 entry = LargeBinary()
                 fp.seek(0)
                 entry.binary.put(fp)
@@ -144,12 +144,16 @@ class PickleArchiver(Archiver):
 
     @Archiver.pre_restore
     def restore(self, fp):
-        logging.debug('fp: {}'.format(type(fp)))
-        bio = io.BytesIO(fp.read())
-        bio.seek(0, 2)
-        logging.debug('file size: {}'.format(bio.tell()))
-        bio.seek(0)
-        return pickle.load(bio)
+        try:
+            logging.debug('fp: {}'.format(type(fp)))
+            # fp.seek(0, 2)
+            # logging.debug('file size: {}'.format(fp.tell()))
+            # fp.seek(0)
+            obj = pickle.load(fp)
+            return obj
+        except:
+            logging.error(traceback.format_exc())
+            return None
 
 
 class NpyArchiver(Archiver):
@@ -164,7 +168,11 @@ class NpyArchiver(Archiver):
 
     @Archiver.pre_restore
     def restore(self, fp):
-        return numpy.load(fp)
+        try:
+            return numpy.load(fp)
+        except:
+            logging.error(traceback.format_exc())
+            return None
 
 
 class Base(object):
