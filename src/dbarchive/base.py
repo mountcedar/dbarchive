@@ -12,7 +12,7 @@ from abc import ABCMeta
 from abc import abstractmethod
 from datetime import datetime
 import logging
-import traceback
+# import traceback
 from copy import deepcopy
 
 import numpy
@@ -21,7 +21,7 @@ import mongoengine
 # from mongoengine.document import Document
 from mongoengine.document import DynamicDocument
 from mongoengine import fields
-from bson import Binary
+# from bson import Binary
 
 __connected = False
 
