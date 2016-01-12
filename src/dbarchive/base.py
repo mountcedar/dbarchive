@@ -12,8 +12,10 @@ from abc import ABCMeta
 from abc import abstractmethod
 from datetime import datetime
 import logging
-# import traceback
+import traceback
 from copy import deepcopy
+import hashlib
+from functools import partial
 
 import numpy
 import pymongo
@@ -23,7 +25,7 @@ from mongoengine.document import DynamicDocument
 from mongoengine import fields
 # from bson import Binary
 
-__connected = False
+__connection = None
 
 
 def connect(database="__py_dbarchive", *args, **kwargs):
@@ -33,16 +35,34 @@ def connect(database="__py_dbarchive", *args, **kwargs):
     arguments are corresponding to the mongoengine api, mongoengine.connect
     see http://docs.mongoengine.org/apireference.html#mongoengine.connect
     '''
-    global __connected
+    global __connection
     try:
-        if not __connected:
-            con = pymongo.MongoClient(*args, **kwargs)
-            con[database]
-            del con
+        if __connection is None:
+            __connection = pymongo.MongoClient(*args, **kwargs)
+            __connection[database]
             mongoengine.connect(database, *args, **kwargs)
-            __connected = True
+        return __connection
     except:
         logging.error('connection to the mongodb failed.')
+        return None
+
+
+def drop_database(database="__py_dbarchive", *args, **kwargs):
+    try:
+        con = connect(database, *args, **kwargs)
+        con.drop_database(database)
+    except:
+        logging.error()
+
+
+def md5sum(f):
+    '''
+    returns md5sum of file-like object
+    '''
+    d = hashlib.md5()
+    for buf in iter(partial(f.read, 128), b''):
+        d.update(buf)
+    return d.hexdigest()
 
 
 class LargeBinary(DynamicDocument):
@@ -59,10 +79,11 @@ class LargeBinary(DynamicDocument):
     - GridFS supports in mongoengine: http://docs.mongoengine.org/guide/gridfs.html
     - GridFS: https://docs.mongodb.org/manual/core/gridfs/
     '''
-    parent_id = fields.ObjectIdField()
-    variable = fields.StringField()
-    archiver = fields.StringField()
-    binary = fields.FileField()
+    parents = fields.ListField(fields.ObjectIdField())
+    variable = fields.StringField(default=None)
+    archiver = fields.StringField(default=None)
+    binary = fields.FileField(default=None)
+    md5sum = fields.StringField(default=None)
     updated = fields.DateTimeField(default=None)
 
 
@@ -72,8 +93,6 @@ class Archiver(object):
 
     The child class of this class should have dump / restore methods
     for handling the binary expression of the variable.
-    dump() method be also with post_dump decorator as well as
-    restore() method be with pre_restore decorator.
 
     See PickleArchiver, NpyArchiver for more concrete example.
     '''
@@ -165,9 +184,11 @@ class Base(object):
                     continue
                 wrapper_instance.__setattr__(k, v)
 
-            for binary in LargeBinary.objects.filter(parent_id=instance.pk).all():
-                # logging.debug('binary: {}'.format(binary.pk))
+            for binary in LargeBinary.objects.filter(parents_contains=instance.pk).all():
+                logging.debug('key {}: {}'.format(binary.variable, binary.pk))
+                logging.debug('archive: {}'.format(binary.archiver))
                 archiver = eval(binary.archiver)()
+                binary.binary.seek(0)
                 obj = archiver.restore(binary.binary)
                 wrapper_instance.__setattr__(binary.variable, obj)
 
@@ -229,14 +250,43 @@ class Base(object):
 
     def update_binaries(self, binaries):
         for k, v in binaries.items():
-            binary = LargeBinary.objects(
-                parent_id=self.collection.pk, variable=k
-            ).modify(
-                upsert=True, new=True,
-                set__parent_id=self.collection.pk,
-                set_variable=k
+            fp = None
+            md5sum_ = 0
+            archiver = None
+
+            if type(v) in self.archivers:
+                archiver = self.archivers[type(v)]
+                fp = archiver.dump(v)
+                fp.seek(0)
+                md5sum_ = md5sum(fp)
+            else:
+                archiver = self.default_archiver
+                fp = archiver.dump(v)
+                fp.seek(0)
+                md5sum_ = md5sum(fp)
+
+            filtered = LargeBinary.objects(
+                md5sum=md5sum_, variable=k
             )
-            if not binary.updated is None:
+
+            if filtered:
+                old_md5sum = filtered.first().md5sum
+            else:
+                old_md5sum = None
+
+            binary = filtered.modify(
+                upsert=True, new=True,
+                add_to_set__parents=self.collection.pk,
+                set__variable=k
+            )
+
+            # if binary.md5sum == md5sum_:
+            #     logging.debug('same object has already exists on the database for {}'.format(k))
+            #     continue
+            # else:
+            #     logging.debug('different md5sum: binary>{}, created>{}'.format(binary.md5sum, md5sum_))
+
+            if old_md5sum != md5sum_:
                 '''
                 FileField object is not automatically deleted.
                 You must delete it expressly.
@@ -245,25 +295,14 @@ class Base(object):
 
                 * http://docs.mongoengine.org/guide/gridfs.html
                 '''
-                logging.debug('updaring binary')
+                logging.debug('newly adding binary contents')
+                fp.seek(0)
                 binary.binary.delete()
-
-            if type(v) in self.archivers:
-                archiver = self.archivers[type(v)]
-                fp = archiver.dump(v)
-                fp.seek(0)
                 binary.binary.put(fp)
+                # binary.md5sum = md5sum_
                 binary.archiver = archiver.__class__.__name__
                 binary.updated = datetime.now()
-                binary.save()
-            else:
-                archiver = self.default_archiver
-                fp = archiver.dump(v)
-                fp.seek(0)
-                binary.binary.put(fp)
-                binary.archiver = archiver.__class__.__name__
-                binary.updated = datetime.now()
-                binary.save()
+            binary.save()
 
     @classmethod
     def drop_collection(cls):
