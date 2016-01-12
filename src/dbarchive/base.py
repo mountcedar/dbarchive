@@ -61,8 +61,9 @@ class LargeBinary(DynamicDocument):
     '''
     parent_id = fields.ObjectIdField()
     variable = fields.StringField()
+    archiver = fields.StringField()
     binary = fields.FileField()
-    updated = fields.DateTimeField()
+    updated = fields.DateTimeField(default=None)
 
 
 class Archiver(object):
@@ -78,9 +79,6 @@ class Archiver(object):
     '''
     __metaclass__ = ABCMeta
 
-    # def __init__(self, parent):
-    #     self.parent = parent
-
     @abstractmethod
     def dump(self, obj):
         '''
@@ -95,94 +93,31 @@ class Archiver(object):
         '''
         return None
 
-    @classmethod
-    def post_dump(cls, f):
-        '''
-        The definition of post-dump processing.
-
-        if the object size exceed 16MB, then create a LargeBinary instance
-        and hold it as a ReferenceFiled in the table.
-        '''
-        def _filter(self, k, v):
-            fp = f(self, k, v)
-            fp.seek(0, 2)
-            if fp.tell() > 16 * 1024 ** 2:
-                logging.debug('switching large binary, size: {}'.format(fp.tell()))
-                entry = LargeBinary()
-                entry.parent_id = self.parent.collection.pk
-                entry.variable = k
-                fp.seek(0)
-                entry.binary.put(fp)
-                entry.created = datetime.now()
-                entry.save()
-                return entry
-            else:
-                binary = Binary(fp.getvalue())
-                return binary
-        return _filter
-
-    @classmethod
-    def pre_restore(cls, f):
-        '''
-        The definition of pre-restore processing.
-
-        Accept LargeBinary reference and extract bson.Binary instance from it
-        and pass the instance to the restore method
-        '''
-        def _filter(self, k, v):
-            if isinstance(v, Binary):
-                bio = io.BytesIO(v)
-                return f(self, k, bio)
-            else:
-                obj = LargeBinary.objects.filter(variable=k, parent_id=self.id).get()
-                return f(self, obj.binary)
-        return _filter
-
 
 class PickleArchiver(Archiver):
     '''
     The Archiver implementation with pickle format.
     '''
-    # def __init__(self, parent):
-    #     Archiver.__init__(self, parent)
-
-    # @Archiver.post_dump
     def dump(self, obj):
         bio = io.BytesIO()
         pickle.dump(obj, bio)
         return bio
 
-    # @Archiver.pre_restore
-    def restore(self, obj):
-        try:
-            logging.debug('fp: {}'.format(type(obj)))
-            return pickle.load(obj)
-        except:
-            logging.error(traceback.format_exc())
-            return None
+    def restore(self, fp):
+        return pickle.load(fp)
 
 
 class NpyArchiver(Archiver):
     '''
     The Archiver implementation with npy format.
     '''
-    # def __init__(self, parent):
-    #     Archiver.__init__(self, parent)
-
-    # @Archiver.post_dump
     def dump(self, obj):
         bio = io.BytesIO()
         numpy.save(bio, obj)
         return bio
 
-    # @Archiver.pre_restore
-    def restore(self, obj):
-        try:
-            logging.debug('fp: {}'.format(type(obj)))
-            return numpy.load(obj)
-        except:
-            logging.error(traceback.format_exc())
-            return None
+    def restore(self, fp):
+        return numpy.load(fp)
 
 
 class Base(object):
@@ -194,38 +129,22 @@ class Base(object):
         'valid_classes', 'default_excludes', 'default_archiver',
         'excludes', 'archivers', 'objects', 'collection'
     ]
+    excludes = []
 
     def __new__(cls, *args, **kwargs):
         connect()
         instance = super(Base, cls).__new__(cls)
-        instance.excludes = deepcopy(cls.default_excludes)
+        cls.excludes = deepcopy(cls.default_excludes)
         instance.default_archiver = PickleArchiver()
         instance.archivers = {numpy.ndarray: NpyArchiver()}
         instance.collection = None
         return instance
 
     @classmethod
-    def database(cls, obj=None):
+    def database(cls, custom=True):
         '''
         Dynamically define a child class of DynamicDocument based on the current class variable configuration.
         '''
-        def getattribute(self, k):
-            '''
-            custom development of __getattribute__ for the DynamicDocument
-            to directly convert the bson.Binary object into the specific type.
-            '''
-            v = object.__getattribute__(self, k)
-            try:
-                archivers = object.__getattribute__(self, 'archivers')
-                if k in archivers:
-                    archiver = eval(archivers[k])()
-                    return archiver.restore(k, v)
-                else:
-                    return v
-            except:
-                # logging.error(traceback.format_exc())
-                return v
-
         def new(clazz, *args, **kwargs):
             '''
             custom development of __new__ for DynamicDocument.
@@ -236,22 +155,26 @@ class Base(object):
             instance.__init__(*args, **kwargs)
             members = inspect.getmembers(instance, lambda a: not(inspect.isroutine(a)))
             attributes = [(k, v) for k, v in members if not k.startswith('_')]
+
             wrapper_instance = cls.__new__(cls)
             wrapper_instance.__init__()
             wrapper_instance.collection = instance
+
             for k, v in attributes:
+                if k in cls.excludes:
+                    continue
                 wrapper_instance.__setattr__(k, v)
+
             for binary in LargeBinary.objects.filter(parent_id=instance.pk).all():
-                logging.debug('binary: {}'.format(binary.pk))
-                archiver = eval(instance.archivers[binary.variable])()
+                # logging.debug('binary: {}'.format(binary.pk))
+                archiver = eval(binary.archiver)()
                 obj = archiver.restore(binary.binary)
                 wrapper_instance.__setattr__(binary.variable, obj)
 
             return wrapper_instance
 
         attributes = {}
-        if obj is None:
-            # attributes['__getattribute__'] = getattribute
+        if custom:
             attributes['__new__'] = new
             pass
         return type(
@@ -259,52 +182,6 @@ class Base(object):
             (DynamicDocument, ),
             attributes
         )
-
-    def create_collection(self):
-        '''
-        create mongodb collection ORM based on the current class variable configuration
-        '''
-        self.collection = self.database(self)()
-        members = inspect.getmembers(self, lambda a: not(inspect.isroutine(a)))
-        attributes = [(k, v) for k, v in members if not k.startswith('_')]
-        archivers = {}
-        binaries = {}
-        for k, v in attributes:
-            if k in self.excludes:
-                continue
-            if type(v) in self.valid_classes:
-                logging.debug("set attribute default: {}, {}".format(k, type(v)))
-                self.collection.__setattr__(k, v)
-            else:
-                binaries[k] = v
-        self.collection.__setattr__('archivers', archivers)
-        self.save()
-        self.create_binaries(binaries)
-        return self.collection
-
-    def create_binaries(self, binaries):
-        for k, v in binaries.items():
-            binary = LargeBinary.objects(
-                parent_id=self.collection.pk, variable=k
-            ).modify(
-                upsert=True, new=True,
-                set__parent_id=self.collection.pk,
-                set_variable=k
-            )
-            if type(v) in self.archivers:
-                archiver = self.archivers[type(v)]
-                fp = archiver.dump(v)
-                fp.seek(0)
-                binary.binary.put(fp)
-                binary.updated = datetime.now()
-                binary.save()
-            else:
-                archiver = self.default_archiver
-                fp = archiver.dump(v)
-                fp.seek(0)
-                binary.binary.put(fp)
-                binary.updated = datetime.now()
-                binary.save()
 
     def save(self):
         '''
@@ -315,26 +192,78 @@ class Base(object):
         else:
             members = inspect.getmembers(self, lambda a: not(inspect.isroutine(a)))
             attributes = [(k, v) for k, v in members if not k.startswith('_')]
-            archivers = {}
+            # archivers = {}
             binaries = {}
             for k, v in attributes:
                 if k in self.excludes:
                     continue
                 if type(v) in self.valid_classes:
-                    logging.debug("set attribute default: {}, {}".format(k, type(v)))
                     self.collection.__setattr__(k, v)
-                elif type(v) in self.archivers.keys():
-                    logging.debug("set attribute customly binalized: {}, {}".format(k, type(v)))
-                    archiver = self.archivers[type(v)]
-                    archivers[k] = archiver.__class__.__name__
-                    binary = archiver.dump(v)
-                    binaries[k] = binary
                 else:
-                    logging.debug("set attribute pickled: {}, {}".format(k, type(v)))
-                    archivers[k] = self.default_archiver.__class__.__name__
-                    binary = self.default_archiver.dump(v)
-            self.collection.__setattr__('archivers', archivers)
+                    binaries[k] = v
+            self.update_binaries(binaries)
+            # self.collection.__setattr__('archivers', archivers)
         self.collection.save()
+
+    def create_collection(self):
+        '''
+        create mongodb collection ORM based on the current class variable configuration
+        '''
+        self.collection = self.database(custom=False)()
+        members = inspect.getmembers(self, lambda a: not(inspect.isroutine(a)))
+        attributes = [(k, v) for k, v in members if not k.startswith('_')]
+        # archivers = {}
+        binaries = {}
+        for k, v in attributes:
+            if k in self.excludes:
+                continue
+            if type(v) in self.valid_classes:
+                logging.debug("set attribute default: {}, {}".format(k, type(v)))
+                self.collection.__setattr__(k, v)
+            else:
+                binaries[k] = v
+        # self.collection.__setattr__('archivers', archivers)
+        self.collection.save()
+        self.update_binaries(binaries)
+        return self.collection
+
+    def update_binaries(self, binaries):
+        for k, v in binaries.items():
+            binary = LargeBinary.objects(
+                parent_id=self.collection.pk, variable=k
+            ).modify(
+                upsert=True, new=True,
+                set__parent_id=self.collection.pk,
+                set_variable=k
+            )
+            if not binary.updated is None:
+                '''
+                FileField object is not automatically deleted.
+                You must delete it expressly.
+
+                See the details in
+
+                * http://docs.mongoengine.org/guide/gridfs.html
+                '''
+                logging.debug('updaring binary')
+                binary.binary.delete()
+
+            if type(v) in self.archivers:
+                archiver = self.archivers[type(v)]
+                fp = archiver.dump(v)
+                fp.seek(0)
+                binary.binary.put(fp)
+                binary.archiver = archiver.__class__.__name__
+                binary.updated = datetime.now()
+                binary.save()
+            else:
+                archiver = self.default_archiver
+                fp = archiver.dump(v)
+                fp.seek(0)
+                binary.binary.put(fp)
+                binary.archiver = archiver.__class__.__name__
+                binary.updated = datetime.now()
+                binary.save()
 
     @classmethod
     def drop_collection(cls):
@@ -342,7 +271,7 @@ class Base(object):
         drop collection representing the class from mongodb
         '''
         connect()
-        for obj in cls.database().objects.all():
+        for obj in cls.database(custom=False).objects.all():
             for binary in LargeBinary.objects.filter(parent_id=obj.pk).all():
                 binary.binary.delete()
                 binary.delete()

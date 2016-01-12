@@ -112,8 +112,6 @@ class MLP(Base):
 
 if __name__ == '__main__':
     import logging
-    import cPickle as pickle
-
     logging.basicConfig(level=logging.DEBUG)
     parser = argparse.ArgumentParser(description='MNIST')
     parser.add_argument('--gpu', '-g', default=-1, type=int,
@@ -146,25 +144,14 @@ if __name__ == '__main__':
     mlp.train_and_test(n_epoch=1)
     mlp.save()
     end_time = time.time()
-
-    with open('xtrain.pkl', 'wb') as fp:
-        pickle.dump(mlp.x_train, fp)
-
     print "time = {} min".format((end_time-start_time)/60.0)
 
     for mlp_ in MLP.objects.all():
         print 'mlp: ', type(mlp_)
-        print '\tmodel: ', type(mlp_.model)
-        print '\tx_train: ', type(mlp_.x_train) if not isinstance(mlp_.x_train, LargeBinary) else mlp_.x_train
-        if isinstance(mlp_.x_train, LargeBinary):
-            print 'x_train pk: ', mlp_.x_train.pk
-        print '\tx_test: ', type(mlp_.x_test) if not isinstance(mlp_.x_test, LargeBinary) else mlp_.x_test
-        if isinstance(mlp_.x_test, LargeBinary):
-            print 'x_test pk: ', mlp_.x_test.pk
-        print '\ty_train: ', type(mlp_.y_train) if not isinstance(mlp_.y_train, LargeBinary) else mlp_.y_train
-        print '\ty_test: ', type(mlp_.y_test) if not isinstance(mlp_.y_test, LargeBinary) else mlp_.y_test
-        print '\toptimizer: ', type(mlp_.optimizer) if not isinstance(mlp_.optimizer, LargeBinary) else mlp_.optimizer
+        for k, v in mlp.__dict__.items():
+            if k.startswith('_'):
+                continue
+            print '\t{}: {}'.format(k, type(v))
 
-    # print 'try learning again.'
-    # print mlp.__dict__
-    # mlp.train_and_test()
+    print 'try learning again'
+    mlp.train_and_test(n_epoch=1)
