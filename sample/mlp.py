@@ -154,7 +154,7 @@ if __name__ == '__main__':
     for mlp_ in MLP.objects.all():
         print 'mlp: ', type(mlp_)
         print '\tmodel: ', type(mlp_.model)
-        print '\tx_train: ', type(mlp_.x_train), mlp_.x_train.pk
+        print '\tx_train: ', type(mlp_.x_train)
         print '\tx_test: ', type(mlp_.x_test)
         print '\ty_train: ', type(mlp_.y_train)
         print '\ty_test: ', type(mlp_.y_test)
