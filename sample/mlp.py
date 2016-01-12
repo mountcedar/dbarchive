@@ -22,6 +22,7 @@ Osamu Sugiyama, https://github.com/mountcedar
 '''
 
 from dbarchive import Base
+from dbarchive.base import LargeBinary
 import argparse
 import time
 import numpy as np
@@ -154,11 +155,15 @@ if __name__ == '__main__':
     for mlp_ in MLP.objects.all():
         print 'mlp: ', type(mlp_)
         print '\tmodel: ', type(mlp_.model)
-        print '\tx_train: ', type(mlp_.x_train)
-        print '\tx_test: ', type(mlp_.x_test)
-        print '\ty_train: ', type(mlp_.y_train)
-        print '\ty_test: ', type(mlp_.y_test)
-        print '\toptimizer: ', type(mlp_.optimizer)
+        print '\tx_train: ', type(mlp_.x_train) if not isinstance(mlp_.x_train, LargeBinary) else mlp_.x_train
+        if isinstance(mlp_.x_train, LargeBinary):
+            print 'x_train pk: ', mlp_.x_train.pk
+        print '\tx_test: ', type(mlp_.x_test) if not isinstance(mlp_.x_test, LargeBinary) else mlp_.x_test
+        if isinstance(mlp_.x_test, LargeBinary):
+            print 'x_test pk: ', mlp_.x_test.pk
+        print '\ty_train: ', type(mlp_.y_train) if not isinstance(mlp_.y_train, LargeBinary) else mlp_.y_train
+        print '\ty_test: ', type(mlp_.y_test) if not isinstance(mlp_.y_test, LargeBinary) else mlp_.y_test
+        print '\toptimizer: ', type(mlp_.optimizer) if not isinstance(mlp_.optimizer, LargeBinary) else mlp_.optimizer
 
     # print 'try learning again.'
     # print mlp.__dict__

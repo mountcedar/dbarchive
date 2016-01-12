@@ -298,6 +298,13 @@ class Base(object):
                 binary.binary.put(fp)
                 binary.updated = datetime.now()
                 binary.save()
+            else:
+                archiver = self.default_archiver
+                fp = archiver.dump(v)
+                fp.seek(0)
+                binary.binary.put(fp)
+                binary.updated = datetime.now()
+                binary.save()
 
     def save(self):
         '''
