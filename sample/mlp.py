@@ -22,7 +22,6 @@ Osamu Sugiyama, https://github.com/mountcedar
 '''
 
 from dbarchive import Base
-from dbarchive.base import LargeBinary
 import argparse
 import time
 import numpy as np
