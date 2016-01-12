@@ -123,6 +123,9 @@ class Sample(Base):
 dbarchive.Baseクラスを継承することで、データベース保存に必要なユーティリティを持ったクラスを作ることができます。
 あとは、インスタンスをsave関数で保存するだけです。
 
+なお、Baseクラスを継承するクラスの__init__メソッドは、引数なしで実行できるように設計されていないといけません。
+これは、データベースからインスタンスを自動作成するときに引数なしでインスタンス化できる必要があるためです。
+
 ```python
 print 'create sample instance'
 sample01 = Sample(10)
@@ -251,13 +254,11 @@ $ wget https://gist.githubusercontent.com/mountcedar/be58ebfe1e9c752a72ac/raw/3e
 
 ```python
 from dbarchive import Base
-from dbarchive import connect
 
 ...
 
 class MLP(Base):
     def __init__(self, data, target, n_inputs=784, n_hidden=784, n_outputs=10, gpu=-1):
-        Base.__init__(self)
         self.excludes.append('xp')
 ...
 ```
@@ -275,20 +276,53 @@ if __name__ == '__main__':
 たった2箇所の操作を追加するだけで、学習済みのパラメータを簡単にデータベースに保存することができました。
 
 ```python
-   for mlp_ in MLP.objects.all():
-        print 'mlp model: ', type(mlp_.model)
+     for mlp_ in MLP.objects.all():
+        print 'mlp: ', type(mlp_)
+        for k, v in mlp.__dict__.items():
+            if k.startswith('_'):
+                continue
+            print '\t{}: {}'.format(k, type(v))
 ```
 
-クエリセットで保存したmodel変数を表示してみると、しっかりとFunctionSetが取得できていることがわかります。以下がサンプルコードの実行例です。
+クエリセットで保存したmlpオブジェクトの変数を表示してみると、しっかりと各変数が取得できていることがわかります。以下がサンプルコードの実行例です。
+
+その後、取得したmlpオブジェクトを使って、再度、学習を行います。
+
+```python
+    print 'try learning again'
+    mlp.train_and_test(n_epoch=1)
+```
+
+以下が実行結果です。識別率が上昇しており、確かに過去の学習結果が反映されていることがわかります。
 
 ```
 $ python ./mlp.py 
-connecting to mongodb
+dropping previously defined collection
 fetch MNIST dataset
 Not using gpu device
 epoch 1
-train mean loss=0.309678050698, accuracy=0.904990477392
-test mean loss=0.125952891005, accuracy=0.962742861339
-time = 0.479408101241 min
-mlp model:  <class 'chainer.function_set.FunctionSet'>
+train mean loss=0.309873049351, accuracy=0.903980953055
+test mean loss=0.129567001387, accuracy=0.95988571746
+DEBUG:root:set attribute default: gpu, <type 'int'>
+DEBUG:root:set attribute default: n_test, <type 'int'>
+DEBUG:root:set attribute default: n_train, <type 'int'>
+time = 1.05201875369 min
+mlp:  <class '__main__.MLP'>
+    x_test: <type 'numpy.ndarray'>
+    x_train: <type 'numpy.ndarray'>
+    default_archiver: <class 'dbarchive.base.PickleArchiver'>
+    n_train: <type 'int'>
+    collection: <class 'mongoengine.base.metaclasses.MLPTable'>
+    n_test: <type 'int'>
+    archivers: <type 'dict'>
+    gpu: <type 'int'>
+    xp: <type 'module'>
+    optimizer: <class 'chainer.optimizers.adam.Adam'>
+    model: <class 'chainer.function_set.FunctionSet'>
+    y_test: <type 'numpy.ndarray'>
+    y_train: <type 'numpy.ndarray'>
+try learning again
+epoch 1
+train mean loss=0.146616529152, accuracy=0.953600001335
+test mean loss=0.106004985619, accuracy=0.968000005313
 ```

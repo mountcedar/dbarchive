@@ -22,7 +22,7 @@ print find_packages('src')
 
 setup(
     name='dbarchive',
-    version='0.0.1b',
+    version='0.0.2b',
     description='',
     author=__author__,
     author_email=__author_email__,
