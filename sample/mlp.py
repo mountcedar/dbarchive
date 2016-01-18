@@ -21,7 +21,7 @@ The usage detail of dbarchive can be read in
 Osamu Sugiyama, https://github.com/mountcedar
 '''
 
-from dbarchive import Base
+import dbarchive
 import argparse
 import time
 import numpy as np
@@ -31,7 +31,7 @@ from chainer import cuda, Variable, FunctionSet, optimizers
 import chainer.functions as F
 
 
-class MLP(Base):
+class MLP(dbarchive.Base):
     def __init__(self, data=None, target=None, n_inputs=784, n_hidden=784, n_outputs=10, gpu=-1):
         self.excludes.append('xp')
         self.model = FunctionSet(l1=F.Linear(n_inputs, n_hidden),
@@ -77,6 +77,7 @@ class MLP(Base):
             sum_accuracy = 0
             sum_loss = 0
             for i in xrange(0, self.n_train, batchsize):
+                print 'x_train: ', self.x_train.shape
                 x_batch = self.xp.asarray(self.x_train[perm[i:i+batchsize]])
                 y_batch = self.xp.asarray(self.y_train[perm[i:i+batchsize]])
 
@@ -117,6 +118,9 @@ if __name__ == '__main__':
                         help='GPU ID (negative value indicates CPU)')
     args = parser.parse_args()
 
+    print 'dropping database'
+    dbarchive.drop_database()
+
     print 'dropping previously defined collection'
     MLP.drop_collection()
 
@@ -130,8 +134,6 @@ if __name__ == '__main__':
     data = [data_train, data_test]
     target = [target_train, target_test]
 
-    start_time = time.time()
-
     if args.gpu >= 0:
         cuda.check_cuda_available()
         cuda.get_device(args.gpu).use()
@@ -139,11 +141,13 @@ if __name__ == '__main__':
     else:
         print "Not using gpu device"
 
-    mlp = MLP(data=data, target=target, gpu=args.gpu)
-    mlp.train_and_test(n_epoch=1)
-    mlp.save()
-    end_time = time.time()
-    print "time = {} min".format((end_time-start_time)/60.0)
+    for i in xrange(2):
+        start_time = time.time()
+        mlp = MLP(data=data, target=target, gpu=args.gpu)
+        mlp.train_and_test(n_epoch=1)
+        mlp.save()
+        end_time = time.time()
+        print "time = {} min".format((end_time-start_time)/60.0)
 
     for mlp_ in MLP.objects.all():
         print 'mlp: ', type(mlp_)
@@ -152,5 +156,5 @@ if __name__ == '__main__':
                 continue
             print '\t{}: {}'.format(k, type(v))
 
-    print 'try learning again'
-    mlp.train_and_test(n_epoch=1)
+        print 'try learning again'
+        mlp_.train_and_test(n_epoch=1)
