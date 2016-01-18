@@ -176,7 +176,6 @@ class Base(object):
         attributes = {}
         if custom:
             attributes['__new__'] = new
-            pass
         return type(
             cls.__name__ + "Table",
             (DynamicDocument, ),
@@ -286,6 +285,14 @@ class Base(object):
             connect()
             return cls.database().objects
 
+        @property
+        def native_objects(cls):
+            '''
+            The queryset instance for quering the mongodb.
+            '''
+            connect()
+            return cls.database(False).objects
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
@@ -305,19 +312,29 @@ if __name__ == '__main__':
     sample02 = Sample(3)
     sample02.save()
 
+    print "query mongodb with custom constructor"
     for sample in Sample.objects.all():
         print 'sample: ', type(sample)
-        print '\tbase: ', sample.base
-        print '\tbin: ', sample.bin
-        print '\tcreated: ', sample.created
+        print '\tbase: ', sample.base, type(sample.base)
+        print '\tbin: ', sample.bin, type(sample.bin)
+        print '\tcreated: ', sample.created, type(sample.created)
 
+    print 'updating sample object'
     sample01.bin = numpy.arange(20)
     sample01.save()
 
+    print "confirming the variable 'bin' is updated."
     for sample in Sample.objects.all():
         print 'sample: ', type(sample)
-        print '\tbase: ', sample.base
-        print '\tbin: ', sample.bin
-        print '\tcreated: ', sample.created
+        print '\tbase: ', sample.base, type(sample.base)
+        print '\tbin: ', sample.bin, type(sample.bin)
+        print '\tcreated: ', sample.created, type(sample.created)
+
+    print "query mongodb without custom constructor"
+    for sample in Sample.native_objects().all():
+        print 'sample: ', type(sample)
+        print '\tbase: ', sample.base, type(sample.base)
+        print '\tbin: ', sample.bin if 'bin' in sample.__dict__ else 'bin object is not found.'
+        print '\tcreated: ', sample.created, type(sample.created)
 
     print "all task completed"
