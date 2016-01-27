@@ -184,9 +184,9 @@ class Base(object):
                     continue
                 wrapper_instance.__setattr__(k, v)
 
-            for binary in LargeBinary.objects.filter(parents_contains=instance.pk).all():
-                logging.debug('key {}: {}'.format(binary.variable, binary.pk))
-                logging.debug('archive: {}'.format(binary.archiver))
+            for binary in LargeBinary.objects.filter(parents=instance.pk).all():
+                # logging.debug('key {}: {}'.format(binary.variable, binary.pk))
+                # logging.debug('archive: {}'.format(binary.archiver))
                 archiver = eval(binary.archiver)()
                 binary.binary.seek(0)
                 obj = archiver.restore(binary.binary)
@@ -238,7 +238,7 @@ class Base(object):
             if k in self.excludes:
                 continue
             if type(v) in self.valid_classes:
-                logging.debug("set attribute default: {}, {}".format(k, type(v)))
+                # logging.debug("set attribute default: {}, {}".format(k, type(v)))
                 self.collection.__setattr__(k, v)
             else:
                 binaries[k] = v
@@ -263,14 +263,19 @@ class Base(object):
                 fp = archiver.dump(v)
                 fp.seek(0)
                 md5sum_ = md5sum(fp)
+            # logging.debug('md5sum for bin "{}" is {}'.format(k, md5sum_))
+            # if isinstance(v, numpy.ndarray):
+            #     logging.debug('v: {}'.format(v))
 
             filtered = LargeBinary.objects(
                 md5sum=md5sum_, variable=k
             )
 
-            if filtered:
+            if filtered.count() > 0:
                 old_md5sum = filtered.first().md5sum
+                # logging.debug('find same binary for {}: {}'.format(k, old_md5sum))
             else:
+                # logging.debug('no same binary for {}'.format(k))
                 old_md5sum = None
 
             binary = filtered.modify(
@@ -278,12 +283,6 @@ class Base(object):
                 add_to_set__parents=self.collection.pk,
                 set__variable=k
             )
-
-            # if binary.md5sum == md5sum_:
-            #     logging.debug('same object has already exists on the database for {}'.format(k))
-            #     continue
-            # else:
-            #     logging.debug('different md5sum: binary>{}, created>{}'.format(binary.md5sum, md5sum_))
 
             if old_md5sum != md5sum_:
                 '''
@@ -294,13 +293,15 @@ class Base(object):
 
                 * http://docs.mongoengine.org/guide/gridfs.html
                 '''
-                logging.debug('newly adding binary contents')
+                # logging.debug('updating binary contents')
                 fp.seek(0)
                 binary.binary.delete()
                 binary.binary.put(fp)
-                # binary.md5sum = md5sum_
+                binary.md5sum = md5sum_
                 binary.archiver = archiver.__class__.__name__
                 binary.updated = datetime.now()
+            # else:
+            #     logging.debug('no changes')
             binary.save()
 
     @classmethod
@@ -310,7 +311,8 @@ class Base(object):
         '''
         connect()
         for obj in cls.database(custom=False).objects.all():
-            for binary in LargeBinary.objects.filter(parent_id=obj.pk).all():
+            for binary in LargeBinary.objects.filter(parents=obj.pk).all():
+                # logging.debug('dropping binary: {}'.format(binary.pk))
                 binary.binary.delete()
                 binary.delete()
         cls.database().drop_collection()
